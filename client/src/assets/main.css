@@ -1,0 +1,26 @@
+html {
+  font-family: Arial;
+	color: #0452c8;
+  scroll-behavior: smooth;
+}
+
+header {
+  margin-bottom: 2%;
+}
+
+header div {
+  padding-left: 1.5%;
+  display: inline-block;
+}
+
+img {
+  width: 6%;
+  height: auto;
+}
+
+h1 {
+  font: 150% Arial;
+  color: #0448af;
+  margin-top: 0;
+}
+
