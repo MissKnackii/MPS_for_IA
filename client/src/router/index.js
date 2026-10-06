@@ -66,7 +66,7 @@ const router = createRouter({
     {
       path: '/gestion-qualite',
       name: 'Gestionqualite',
-      component: () => import('../components/GestionDocumentaire/Gestionqualite.vue'),
+      component: () => import('../components/GestionDocumentaire/GestionQualite.vue'),
     },
     {
       path: '/affichage-maintenance',
