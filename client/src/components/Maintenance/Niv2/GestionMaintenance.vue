@@ -58,6 +58,7 @@ import HeuremachinesModal from "@/components/Maintenance/HeuremachinesModal.vue"
 import GammePopUp from "@/components/Maintenance/Niv2/GammePopUp.vue";
 import FiltersNiv2 from "@/components/Maintenance/Niv2/FiltersNiv2.vue";
 import DetailModalNiv2 from "@/components/Maintenance/Niv2/DetailModalNiv2.vue";
+import { getWeekRange } from "@/components/Maintenance/dates.js";
 
 export default {
   components: {
@@ -86,6 +87,7 @@ export default {
       moyens:null,
       selectedAnalytique:null,
       lastFiltres: null,
+      requeteFiltre: 0,
     }
   },
 
@@ -128,8 +130,8 @@ export default {
     onSelectAnalytique(codeAnalytique) {
       //console.log(codeAnalytique)
       this.selectedAnalytique = codeAnalytique
-      this.filtrer({}, codeAnalytique)
-      //console.log(codeAnalytique)
+      // On garde la période déjà affichée
+      this.filtrer({ ...(this.lastFiltres || {}), analytique: codeAnalytique })
     },
     getMoyens(analytique, sousSecteur) {
       if (!analytique) {
@@ -190,49 +192,26 @@ export default {
       //console.log(this.selectedMaintenance)
     },
 
-    getWeekRange(date = new Date()) {
-      const day = date.getDay()
-      const diffToMonday = day === 0 ? -6 : 1 - day
-      const monday = new Date(date)
-      monday.setDate(date.getDate() + diffToMonday)
-
-      const sunday = new Date(monday)
-      sunday.setDate(monday.getDate() + 6)
-
-      return {
-        firstday: monday.toISOString().split('T')[0],
-        lastday: sunday.toISOString().split('T')[0],
-      }
-    },
-
-    filtrer(filtres = {}, codeAnalytique = null) {
-      if (codeAnalytique) {
-        this.analytique = codeAnalytique
-        filtres.analytique = codeAnalytique
+    filtrer(filtres = {}) {
+      if (filtres.view === 'month') {
+        filtres.periode = 'mois'
+        filtres.annee = filtres.year
+        filtres.mois = filtres.month + 1
+      } else if (filtres.view === 'year') {
+        filtres.periode = 'annee'
+        filtres.annee = filtres.year
+      } else if (filtres.view === 'retards') {
+        // Pas de période : on supprime celle qui viendrait de lastFiltres
+        delete filtres.periode
+      } else {
+        // Semaine par défaut (lundi → vendredi)
+        const { firstday, lastday } = getWeekRange(filtres.date ? new Date(filtres.date) : new Date())
         filtres.view = 'week'
-      }
-      // console.log("VIEW =", filtres.view)
-
-      if (filtres.view === 'week') {
-        const { firstday, lastday } = this.getWeekRange(filtres.date)
         filtres.periode = 'semaine'
         filtres.firstday = firstday
         filtres.lastday = lastday
       }
-      else if (filtres.view === 'month') {
-        filtres.periode = 'mois'
-        filtres.annee = filtres.year
-        filtres.mois = filtres.month + 1
-      }
-      else if (filtres.view === 'year') {
-        filtres.periode = 'annee'
-        filtres.annee = filtres.year
-      }
-      else {
-        const today = new Date()
-        filtres.periode = 'semaine'
-        filtres.date = today.toISOString().split('T')[0]
-      }
+
       Object.keys(filtres).forEach(key => {
         if (
             filtres[key] === null ||
@@ -243,8 +222,10 @@ export default {
           delete filtres[key]
         }
       })
+
       this.lastFiltres = { ...filtres }
-      //console.log("FILTRES =", JSON.stringify(filtres))
+      const requete = ++this.requeteFiltre
+
       const params = new URLSearchParams(filtres).toString()
       //console.log(params)
       // 4️⃣ Appeler le backend
@@ -255,8 +236,8 @@ export default {
           return res.json()
         })
         .then(data => {
-          //console.log('🔍 Résultat du filtrage :', data)
-          this.maintenance = data
+          // On ignore une réponse arrivée après une demande plus récente
+          if (requete === this.requeteFiltre) this.maintenance = data
         })
         .catch(err => console.error('Erreur filtrer() :', err))
     },
