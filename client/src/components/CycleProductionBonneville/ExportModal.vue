@@ -1,5 +1,6 @@
 <script setup>
 import {computed, defineEmits, defineProps, ref} from 'vue'
+import Loader from "@/components/CycleProductionBonneville/loader.vue";
 
 const props = defineProps({
   data: Object,
@@ -19,6 +20,8 @@ let dateDebut = ref('')
 let dateFin = ref('')
 
 let passage2 = ref(false)
+
+let showLoader = ref(false)
 
 const emit = defineEmits(['close', 'validate'])
 
@@ -60,6 +63,7 @@ let getReferencesPieces = async (idMachine) => {
 }
 
 let exportData = async () => {
+  showLoader.value = true
   await fetch(`${import.meta.env.VITE_API_URL}/consultation/exportData`, {
     method: 'POST',
     headers: {
@@ -91,9 +95,12 @@ let exportData = async () => {
       })
 
       .catch(err => console.log(err))
+      .finally(() => {
+        showLoader.value = false
+      })
 }
 let exportLibelles = async () => {
-
+  showLoader.value = true
   await fetch(`${import.meta.env.VITE_API_URL}/consultation/exportLibelles`, {
     method: 'POST',
     headers: {
@@ -118,6 +125,9 @@ let exportLibelles = async () => {
       })
 
       .catch(err => console.log(err))
+      .finally(() => {
+        showLoader.value = false
+      })
 }
 getMachines()
 </script>
@@ -172,12 +182,13 @@ getMachines()
       </main>
 
       <footer class="modal-footer">
-        <button id="valider" @click="exportData">Terminer</button>
+        <button id="valider" @click="exportData" :disabled="showLoader">Terminer</button>
         <br>
-        <button id="valider" @click="exportLibelles">Exporter les libellés</button>
+        <button id="valider" @click="exportLibelles" :disabled="showLoader">Exporter les libellés</button>
       </footer>
     </div>
   </div>
+  <loader v-if="showLoader" />
 </template>
 
 <style scoped>
