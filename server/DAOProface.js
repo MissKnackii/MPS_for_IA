@@ -255,55 +255,65 @@ class DAOProface {
 
     async filtrerMaintenance(periode, firstday, lastday, mois, annee, analytique, sousSecteur, site, moyen, idOperationMaintenance, etat, niveau) {
         try {
-            const conditions = [
-                "ope.idOperationGamme = opeM.id",
-                "moy.code = ope.moyenCode",
-                "ope.idOperationGamme = opeG.id",
-                "ope.moyenCode = opeG.moyenCode"
+            const request = new sql.Request();
+            const conditions = [];
+
+            // 🔹 Filtres simples (une seule valeur par filtre)
+            const filtres = [
+                ['analytique', 'moy.codeAnalytique', analytique],
+                ['sousSecteur', 'moy.sousSecteur', sousSecteur],
+                ['site', 'moy.site', site],
+                ['moyen', 'ope.moyenCode', moyen],
+                ['operation', 'opeM.libelle', idOperationMaintenance],
+                ['niveau', 'opeM.niveau', niveau],
             ];
-            //console.log(periode, firstday, lastday, mois, annee, analytique, sousSecteur, site, moyen, idOperationMaintenance, etat, niveau)
-            if (analytique !== null) conditions.push(`moy.codeAnalytique = '${analytique}'`);
-            if (sousSecteur !== null) conditions.push(`moy.sousSecteur = '${sousSecteur}'`);
-            if (site !== null) conditions.push(`moy.site = '${site}'`);
-            if (moyen !== null) conditions.push(`ope.moyenCode = '${moyen}'`);
-            // console.log(idOperationMaintenance);
-            if (idOperationMaintenance !== null) conditions.push(`opeM.libelle = '${idOperationMaintenance.replace(/'/g, "''")}'`);
-            if (etat !== null) conditions.push(`ope.etatOperation = '${etat}'`);
-            if (niveau !== null) conditions.push(`opeM.niveau = ${niveau}`);
-            // console.log(conditions);
-            // 🔹 Période
-            if (periode === "semaine") {
-                // Inclure :
-                // 1️⃣ Opérations chevauchant la période
-                // 2️⃣ Opérations en retard dont la dateDebut > lastday
-                conditions.push(`
-                    (
-                      (ope.dateDebut <= '${lastday}' AND ope.dateFin >= '${firstday}')
-                      OR
-                      (ope.dateDebut > '${lastday}' AND ope.etatOperation = 'en retard')
-                    )
-                `);
-            } else if (periode === "mois") {
-                // Même logique sur le mois
-                conditions.push(`(
-                ((MONTH(ope.dateDebut) = ${mois} AND YEAR(ope.dateDebut) = ${annee})
-                  OR (MONTH(ope.dateFin) = ${mois} AND YEAR(ope.dateFin) = ${annee})
-                  OR (ope.dateDebut <= EOMONTH(DATEFROMPARTS(${annee}, ${mois}, 1)) 
-                      AND ope.dateFin >= DATEFROMPARTS(${annee}, ${mois}, 1)))
-                   OR
-                    (ope.dateDebut > EOMONTH(DATEFROMPARTS(${annee}, ${mois}, 1)) AND ope.etatOperation = 'en retard')
-                )`);
-            } else if (periode === "annee") {
-                conditions.push(`(YEAR(ope.dateDebut) = ${annee} OR YEAR(ope.dateFin) = ${annee})`);
+            for (const [param, colonne, valeur] of filtres) {
+                if (valeur !== null) {
+                    request.input(param, valeur);
+                    conditions.push(`${colonne} = @${param}`);
+                }
             }
 
-            // 🔹 Si aucun état n’est spécifié → par défaut “en retard” et “à faire”
-            if (!etat) {
-                conditions.push(`ope.etatOperation IN ('en retard', 'à faire')`);
+            // 🔹 Période : la carte chevauche la période (dates sans horaire, bornes incluses)
+            let periodeOk = '1 = 1';
+            if (periode === "semaine") {
+                // Format strict AAAA-MM-JJ, sinon on refuse
+                const formatISO = /^\d{4}-\d{2}-\d{2}$/;
+                if (!formatISO.test(firstday) || !formatISO.test(lastday)) {
+                    throw new Error(`Dates de semaine invalides : ${firstday} / ${lastday}`);
+                }
+                request.input('firstday', sql.VarChar(10), firstday);
+                request.input('lastday', sql.VarChar(10), lastday);
+                periodeOk = `(ope.dateDebut <= CONVERT(date, @lastday, 23)
+                              AND ope.dateFin >= CONVERT(date, @firstday, 23))`;
+            } else if (periode === "mois") {
+                request.input('annee', sql.Int, annee);
+                request.input('mois', sql.Int, mois);
+                periodeOk = `(ope.dateDebut <= EOMONTH(DATEFROMPARTS(@annee, @mois, 1))
+                              AND ope.dateFin >= DATEFROMPARTS(@annee, @mois, 1))`;
+            } else if (periode === "annee") {
+                request.input('annee', sql.Int, annee);
+                periodeOk = `(ope.dateDebut <= DATEFROMPARTS(@annee, 12, 31)
+                              AND ope.dateFin >= DATEFROMPARTS(@annee, 1, 1))`;
+            }
+
+            // 🔹 État
+            if (etat === 'en retard') {
+                // Un retard est affiché quelle que soit la période
+                conditions.push(`ope.etatOperation = 'en retard'`);
+            } else if (etat !== null) {
+                // Autre état choisi → cet état, sur la période
+                request.input('etat', etat);
+                conditions.push(`ope.etatOperation = @etat`);
+                conditions.push(periodeOk);
+            } else {
+                // Par défaut → "à faire" de la période + toutes les cartes "en retard"
+                conditions.push(`(ope.etatOperation = 'en retard'
+                                  OR (ope.etatOperation = 'à faire' AND ${periodeOk}))`);
             }
 
             // 🔹 Requête finale
-            const request = `
+            const results = await request.query(`
               SELECT DISTINCT
                 opeM.libelle,
                 opeM.niveau,
@@ -317,12 +327,9 @@ class DAOProface {
               JOIN PROFACE.dbo.Maintenance_OperationsMaintenance opeM ON ope.idOperationGamme = opeM.id
               JOIN PROFACE.dbo.Maintenance_Moyens moy ON moy.code = ope.moyenCode
               JOIN PROFACE.dbo.Maintenance_OperationsGamme opeG ON ope.idOperationGamme = opeG.id AND ope.moyenCode = opeG.moyenCode
-              WHERE ${conditions.join(" AND ")}
+              ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
               ORDER BY ope.moyenCode ASC, ope.dateDebut ASC
-            `;
-            console.log(request);
-            const results = await sql.query(request);
-            //console.log(results);
+            `);
             return results;
         } catch (e) {
             console.error(e);

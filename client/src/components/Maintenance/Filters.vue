@@ -2,6 +2,7 @@
 import {ref, computed, onMounted, defineEmits, defineProps, watch} from 'vue'
 import { useAuthStore } from '@/store/index.js'
 import MachinesArretModal from "@/components/Maintenance/Niv2/MachinesArretModal.vue";
+import { getWeekRange, toFrenchDate } from "@/components/Maintenance/dates.js";
 
 const store = useAuthStore()
 const user = computed(() => store.user)
@@ -48,20 +49,6 @@ const displayedDate = ref("")
 const currentView = ref('year')
 let retard = ref();
 
-function getWeekRange(date = new Date()) {
-  const day = date.getDay()
-  const diffToMonday = day === 0 ? -6 : 1 - day
-  const monday = new Date(date)
-  monday.setDate(date.getDate() + diffToMonday)
-
-  const sunday = new Date(monday)
-  sunday.setDate(monday.getDate() + 6)
-
-  return {
-    firstday: monday.toISOString().split('T')[0],
-    lastday: sunday.toISOString().split('T')[0],
-  }
-}
 function applyFilters() {
   emit('filter', {
     analytique: analytique.value,
@@ -92,21 +79,12 @@ function applyFilters() {
   })*/
 }
 function applyFiltersRetard() {
-  emit('filter', {
-    analytique: analytique.value,
-    sousSecteur: sousSecteur.value,
-    moyen: machine.value,
-    idOperationMaintenance: operation.value,
-    etat: "en retard",
-    niveau: niveau.value,
-    date: currentDate.value,
-    view: 'year',
-    year: year.value,
-    month: month.value,
-    week: week.value,
-  })
-  getAvancement()
-  displayDate('year')
+  // L'état est aussi mis à jour dans la liste déroulante,
+  // pour que "Filtrer" garde ce choix.
+  etat.value = 'en retard'
+  displayDate('retards')
+  periodChange()
+  applyFilters()
 }
 
 
@@ -130,31 +108,30 @@ const closeGammes = () => {
 function resetFilters() {
   analytique.value = ''
   sousSecteur.value = ''
+  sousSecteurs.value = ''
   machine.value = ''
   operation.value = ''
   etat.value = ''
-  niveau.value = ''
+  niveau.value = 1
   currentDate.value = new Date()
-  currentView.value = 'week'
-  year.value = ref(currentDate.value.getFullYear())
-  month.value = ref(currentDate.value.getDate())
-  week.value = ref(getWeek(currentDate.value))
-  sousSecteurs.value = ''
-  getRetard(analytique)
-  getAvancement()
-  emit('filter', {
-    analytique: 'null',
-    sousSecteur: '',
-    moyen: '',
-    idOperationMaintenance: '',
-    etat: '',
-    niveau: '',
-    date: new Date(),
-    view: 'week',
-    year: year.value,
-    month: month.value,
-    week: week.value,
-  })
+  syncFromCurrentDate()
+  displayDate('week')
+  periodChange()
+  getRetard(null)
+  applyFilters()
+}
+
+function onAnalytiqueChange() {
+  sousSecteur.value = ''
+  machine.value = ''
+  getSousSecteurs(analytique.value)
+  getMoyens(analytique.value, '')
+  getRetard(analytique.value)
+}
+
+function onSousSecteurChange() {
+  machine.value = ''
+  getMoyens(analytique.value, sousSecteur.value)
 }
 
 function getWeek(d = new Date()) {
@@ -228,42 +205,34 @@ function displayDate(unit) {
   } else if (unit === 'month') {
     displayedDate.value = `${months[month.value]} ${year.value}`
   } else if (unit === 'week') {
-    const cd = currentDate.value
-    displayedDate.value = `Semaine ${week.value} | ${getWeekRange().firstday} - ${getWeekRange().lastday}`  }
+    const { firstday, lastday } = getWeekRange(currentDate.value)
+    displayedDate.value = `Semaine ${week.value} | ${toFrenchDate(firstday)} - ${toFrenchDate(lastday)}`
+  } else if (unit === 'retards') {
+    displayedDate.value = 'Toutes les cartes en retard'
+  }
 }
 
 function changeDate(direction) {
+  if (currentView.value === 'retards') return
+  const cd = currentDate.value
   if (currentView.value === 'year') {
-
-    year.value += direction
-    displayedDate.value = year.value
-    currentDate.value.setFullYear(year.value)
-
+    currentDate.value = new Date(cd.getFullYear() + direction, cd.getMonth(), cd.getDate())
   } else if (currentView.value === 'month') {
-
-    month.value += direction
-    if (month.value < 0) { month.value = 11; year.value-- }
-    else if (month.value > 11) { month.value = 0; year.value++ }
-    currentDate.value.setMonth(month.value)
-    currentDate.value.setFullYear(year.value)
-    displayedDate.value = `${months[month.value]} ${year.value}`
-    syncFromCurrentDate()
-
+    // On reste sur un jour qui existe dans le mois cible (ex. 31/10 → 30/11)
+    const cible = new Date(cd.getFullYear(), cd.getMonth() + direction, 1)
+    const dernierJour = new Date(cible.getFullYear(), cible.getMonth() + 1, 0).getDate()
+    cible.setDate(Math.min(cd.getDate(), dernierJour))
+    currentDate.value = cible
   } else if (currentView.value === 'week') {
-    currentDate.value.setDate(currentDate.value.getDate() + direction * 7)
-    console.log(currentDate.value)
-    syncFromCurrentDate()
-    const cd = currentDate.value
-    displayedDate.value = `Semaine ${week.value} | ${getWeekRange(currentDate.value).firstday} - ${getWeekRange(currentDate.value).lastday}`
+    currentDate.value = new Date(cd.getFullYear(), cd.getMonth(), cd.getDate() + direction * 7)
   }
+  syncFromCurrentDate()
+  displayDate(currentView.value)
 }
 
-function getRetard(analytique) {
-  //console.log(analytique.value)
-  if (analytique.value === ''|| analytique.value === null) {
-    analytique = null
-  }
-  fetch(`${import.meta.env.VITE_API_URL}/maintenance/allRetards?codeAnalytique=${analytique}`, {
+function getRetard(valeur) {
+  const code = valeur ? valeur : null
+  fetch(`${import.meta.env.VITE_API_URL}/maintenance/allRetards?codeAnalytique=${code}`, {
     method: 'GET',
   })
   .then(res => res.json())
@@ -276,8 +245,7 @@ function getRetard(analytique) {
 }
 
 function getAvancement() {
-  let firstday = getWeekRange().firstday
-  let lastday = getWeekRange().lastday
+  const { firstday, lastday } = getWeekRange(currentDate.value)
 
   //console.log(firstday, lastday, analytique.value, sousSecteur.value, machine.value, month.value, year.value)
   if (currentView.value === 'week') {
@@ -315,11 +283,13 @@ onMounted(() => {
   displayDate('week')
   getOperationsMaintenance ()
   applyFilters()
-  getRetard(analytique)
+  getRetard(analytique.value)
   getAvancement()
 })
 watch(selectedAnalytique, (newVal) => {
   analytique.value = newVal;
+  getSousSecteurs(newVal)
+  getMoyens(newVal, '')
   getRetard(newVal)
 })
 </script>
@@ -333,13 +303,17 @@ watch(selectedAnalytique, (newVal) => {
       <button class="time-filters" @click="() => {displayDate('week'); periodChange(); applyFilters(); getAvancement()}">Semaines</button>
 
       <div id="week-selector">
-        <div @click="() => {changeDate(-1); periodChange(); applyFilters()}" class="triangle-code" id="triangle-left"></div>
+        <div @click="() => {changeDate(-1); periodChange(); applyFilters()}"
+             :style="{ visibility: currentView === 'retards' ? 'hidden' : 'visible' }"
+             class="triangle-code" id="triangle-left"></div>
 
         <div id="date">
           <p>{{ displayedDate }}</p>
         </div>
 
-        <div @click="() => {changeDate(1); periodChange(); applyFilters()}" class="triangle-code" id="triangle-right"></div>
+        <div @click="() => {changeDate(1); periodChange(); applyFilters()}"
+             :style="{ visibility: currentView === 'retards' ? 'hidden' : 'visible' }"
+             class="triangle-code" id="triangle-right"></div>
       </div>
 
       <div id="retards">
@@ -363,7 +337,7 @@ watch(selectedAnalytique, (newVal) => {
     <div id="filters">
       <div class="container">
         <label for="analytique" >Section analytique :</label>
-        <select name="analytique" id="analytique" v-model="analytique" @change="() => {getSousSecteurs(analytique); getMoyens(analytique.value, sousSecteur.value); getRetard(analytique)}">
+        <select name="analytique" id="analytique" v-model="analytique" @change="onAnalytiqueChange">
           <option value="">--Please choose an option--</option>
           <option value="Assemblage/Tri">Assemblage/Tri</option>
           <option value="Decolletage Monobroche">Décolletage monobroche</option>
@@ -380,7 +354,7 @@ watch(selectedAnalytique, (newVal) => {
 
       <div class="container">
         <label for="sous-secteur">Sous-secteur :</label>
-        <select name="sous-secteur" id="sous-secteur" v-model="sousSecteur" @change="() => {getMoyens(analytique, sousSecteur)}">
+        <select name="sous-secteur" id="sous-secteur" v-model="sousSecteur" @change="onSousSecteurChange">
           <option value="">--Please choose an option--</option>
           <option v-for="ss in sousSecteurs" :value="ss.sousSecteur">{{ss.sousSecteur}}</option>
         </select>

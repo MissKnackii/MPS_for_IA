@@ -35,6 +35,7 @@ router.get("/filtrer", function(req, res) {
         let niveau = req.query.niveau?req.query.niveau:null;
         //console.log(periode, firstday, lastday, mois, annee, analytique, sousSecteur, site, moyen, idOperationMaintenance, etat, niveau);
         daoProface.filtrerMaintenance(periode, firstday, lastday, mois, annee, analytique, sousSecteur, site, moyen, idOperationMaintenance, etat, niveau).then(value => {
+            if (!value) return res.status(500).json({ erreur: "Erreur lors du filtrage" });
             res.json(value.recordset)
         })
     } catch (e) {

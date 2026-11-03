@@ -61,7 +61,7 @@ const cardNiv = computed(() => {
       <div class="modal">
         <header class="modal-header">
           <h2>Machine {{maintenance.moyenCode}} - {{maintenance.libelle}}</h2>
-          <div id="close" @click="emitClose"><img src="../../assets/x.png"></div>
+          <div id="close" @click="emitClose"><img src="@/assets/x.png"></div>
         </header>
         <hr>
         <main class="modal-body">
